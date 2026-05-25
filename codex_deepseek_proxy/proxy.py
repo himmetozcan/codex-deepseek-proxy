@@ -10,14 +10,16 @@ Responses-style events back.
 
 from __future__ import annotations
 
-import json
 import fnmatch
+import json
 import os
+import threading
 import time
 import traceback
 import urllib.error
 import urllib.request
 import uuid
+from collections import OrderedDict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
@@ -30,9 +32,16 @@ DEEPSEEK_CHAT_URL = os.environ.get(
 LOG_PATH = os.path.expanduser(
     os.environ.get("CODEX_DEEPSEEK_PROXY_LOG", "~/.codex/deepseek-responses-proxy.log")
 )
-# auto: disable DeepSeek thinking mode, omit the field for routed local backends.
+# auto: enable DeepSeek thinking mode, omit the field for routed local backends.
 THINKING = os.environ.get("CODEX_DEEPSEEK_THINKING", "auto")
 DEBUG_EVENTS = os.environ.get("CODEX_DEEPSEEK_DEBUG_EVENTS") in ("1", "true", "yes")
+REASONING_STATE_PATH = os.path.expanduser(
+    os.environ.get(
+        "CODEX_DEEPSEEK_REASONING_STATE",
+        "~/.codex/deepseek-reasoning-state.json",
+    )
+)
+MAX_REASONING_STATE = int(os.environ.get("CODEX_DEEPSEEK_MAX_REASONING_STATE", "1000"))
 
 
 def parse_model_routes(value: str | None) -> list[tuple[str, str]]:
@@ -87,8 +96,87 @@ def thinking_mode_for_upstream(upstream_url: str) -> str | None:
     if THINKING == "omit":
         return None
     if THINKING == "auto":
-        return "disabled" if upstream_url == DEEPSEEK_CHAT_URL else None
+        return "enabled" if upstream_url == DEEPSEEK_CHAT_URL else None
     return THINKING
+
+
+def load_reasoning_state() -> OrderedDict[str, str]:
+    try:
+        with open(REASONING_STATE_PATH, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+    except Exception:
+        return OrderedDict()
+
+    if not isinstance(data, dict):
+        return OrderedDict()
+    items = data.get("reasoning_by_tool_call")
+    if not isinstance(items, dict):
+        return OrderedDict()
+    return OrderedDict(
+        (str(call_id), str(reasoning))
+        for call_id, reasoning in items.items()
+        if call_id and reasoning
+    )
+
+
+REASONING_LOCK = threading.RLock()
+REASONING_BY_TOOL_CALL = load_reasoning_state()
+
+
+def save_reasoning_state() -> None:
+    os.makedirs(os.path.dirname(REASONING_STATE_PATH), exist_ok=True)
+    payload = {"reasoning_by_tool_call": dict(REASONING_BY_TOOL_CALL)}
+    temp_path = f"{REASONING_STATE_PATH}.tmp"
+    with open(temp_path, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, ensure_ascii=False)
+        handle.write("\n")
+    try:
+        os.chmod(temp_path, 0o600)
+    except OSError:
+        pass
+    os.replace(temp_path, REASONING_STATE_PATH)
+
+
+def remember_reasoning_for_tool_calls(
+    tool_states: dict[int, dict[str, Any]],
+    reasoning_content: str,
+) -> None:
+    if not tool_states or not reasoning_content:
+        return
+
+    with REASONING_LOCK:
+        stored = 0
+        for _, state in sorted(tool_states.items()):
+            call_id = state.get("call_id")
+            if not call_id:
+                continue
+            REASONING_BY_TOOL_CALL[str(call_id)] = reasoning_content
+            REASONING_BY_TOOL_CALL.move_to_end(str(call_id))
+            stored += 1
+        while len(REASONING_BY_TOOL_CALL) > MAX_REASONING_STATE:
+            REASONING_BY_TOOL_CALL.popitem(last=False)
+        save_reasoning_state()
+    if stored:
+        debug(
+            "stored reasoning_content "
+            f"tool_calls={stored} chars={len(reasoning_content)}"
+        )
+
+
+def reasoning_content_for_tool_calls(tool_calls: list[dict[str, Any]]) -> str:
+    reasoning_parts: list[str] = []
+    seen: set[str] = set()
+    with REASONING_LOCK:
+        for call in tool_calls:
+            call_id = call.get("id")
+            if not call_id:
+                continue
+            reasoning_content = REASONING_BY_TOOL_CALL.get(str(call_id))
+            if not reasoning_content or reasoning_content in seen:
+                continue
+            reasoning_parts.append(reasoning_content)
+            seen.add(reasoning_content)
+    return "\n\n".join(reasoning_parts)
 
 
 def log(message: str) -> None:
@@ -140,13 +228,15 @@ def responses_input_to_chat_messages(request_body: dict[str, Any]) -> list[dict[
     def flush_pending_tool_calls() -> None:
         if not pending_tool_calls:
             return
-        messages.append(
-            {
-                "role": "assistant",
-                "content": "",
-                "tool_calls": list(pending_tool_calls),
-            }
-        )
+        assistant_message = {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": list(pending_tool_calls),
+        }
+        reasoning_content = reasoning_content_for_tool_calls(pending_tool_calls)
+        if reasoning_content:
+            assistant_message["reasoning_content"] = reasoning_content
+        messages.append(assistant_message)
         pending_tool_calls.clear()
 
     for item in request_body.get("input") or []:
@@ -234,6 +324,9 @@ def message_summary(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
             entry["tool_call_ids"] = [call.get("id") for call in message["tool_calls"]]
         if message.get("tool_call_id"):
             entry["tool_call_id"] = message.get("tool_call_id")
+        reasoning_content = message.get("reasoning_content")
+        if isinstance(reasoning_content, str) and reasoning_content:
+            entry["reasoning_content_chars"] = len(reasoning_content)
         content = message.get("content")
         if isinstance(content, str) and content:
             entry["content_prefix"] = content[:80]
@@ -395,6 +488,9 @@ def apply_thinking_controls(
     if thinking_mode != "enabled":
         return
 
+    if chat_request.get("tool_choice") == "auto":
+        chat_request.pop("tool_choice", None)
+
     reasoning = request_body.get("reasoning")
     if isinstance(reasoning, dict) and reasoning.get("effort"):
         effort = reasoning["effort"]
@@ -542,6 +638,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
         output: list[dict[str, Any]] = []
         text_state_holder: dict[str, Any] = {"state": None}
         tool_states: dict[int, dict[str, Any]] = {}
+        reasoning_state_holder: dict[str, str] = {"text": ""}
 
         try:
             with urllib.request.urlopen(upstream_request, timeout=600) as upstream:
@@ -558,9 +655,13 @@ class ProxyHandler(BaseHTTPRequestHandler):
                     debug(
                         "chunk "
                         f"finish={choice.get('finish_reason')} "
+                        f"reasoning={len(delta.get('reasoning_content') or '')} "
                         f"content={len(delta.get('content') or '')} "
                         f"tool_calls={len(delta.get('tool_calls') or [])}"
                     )
+                    reasoning_delta = delta.get("reasoning_content")
+                    if reasoning_delta:
+                        reasoning_state_holder["text"] += reasoning_delta
 
                     self._stream_content_delta(delta, output, sse, text_state_holder)
                     self._stream_tool_deltas(delta, output, tool_states, sse)
@@ -579,12 +680,14 @@ class ProxyHandler(BaseHTTPRequestHandler):
 
         if text_state_holder["state"] is not None:
             self._finish_text_item(text_state_holder["state"], output, sse)
+        remember_reasoning_for_tool_calls(tool_states, reasoning_state_holder["text"])
         self._finish_tool_items(tool_states, output, sse)
         completed = base_response(request_body, response_id, "completed", output)
         debug(
             "completed "
             f"output_items={len(output)} "
             f"text_chars={len(text_state_holder['state']['text']) if text_state_holder['state'] else 0} "
+            f"reasoning_chars={len(reasoning_state_holder['text'])} "
             f"tool_items={len(tool_states)}"
         )
         sse.send("response.completed", {"response": completed})

@@ -252,8 +252,11 @@ def main() -> int:
     parser.add_argument("--python", default=shutil.which("python3") or sys.executable)
     parser.add_argument(
         "--thinking",
-        default=os.environ.get("CODEX_DEEPSEEK_THINKING", "disabled"),
-        help="Value for CODEX_DEEPSEEK_THINKING. Use 'omit' for strict local backends.",
+        default=os.environ.get("CODEX_DEEPSEEK_THINKING", "auto"),
+        help=(
+            "Value for CODEX_DEEPSEEK_THINKING. The default 'auto' enables "
+            "DeepSeek thinking and omits the field for routed local backends."
+        ),
     )
     parser.add_argument(
         "--model-route",

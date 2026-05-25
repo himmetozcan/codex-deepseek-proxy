@@ -21,6 +21,8 @@ Codex -> http://127.0.0.1:8877/responses -> local proxy -> DeepSeek chat/complet
 ```
 
 The proxy also converts streaming events and normalizes tool-call history so Codex shell/tool calls can continue working.
+For DeepSeek thinking mode, it preserves the required `reasoning_content` for
+tool-call turns and replays it in later requests.
 
 ## Status
 
@@ -154,10 +156,20 @@ export CODEX_DEEPSEEK_PROXY_PORT="8877"
 export DEEPSEEK_CHAT_URL="https://api.deepseek.com/chat/completions"
 export CODEX_DEEPSEEK_MODEL_ROUTES='{"qwen*":"http://YOUR_VLLM_HOST:8000/v1/chat/completions"}'
 export CODEX_DEEPSEEK_PROXY_LOG="$HOME/.codex/deepseek-responses-proxy.log"
-export CODEX_DEEPSEEK_THINKING="disabled"
+export CODEX_DEEPSEEK_THINKING="auto"
 ```
 
-Set `CODEX_DEEPSEEK_THINKING=omit` if your upstream endpoint rejects the `thinking` field.
+`CODEX_DEEPSEEK_THINKING=auto` enables thinking for the default DeepSeek
+upstream and omits the `thinking` field for routed local backends. Set
+`CODEX_DEEPSEEK_THINKING=omit` only if you intentionally want the proxy to omit
+the field for every upstream.
+
+When DeepSeek uses thinking mode with tool calls, the proxy stores the required
+tool-call reasoning state locally in:
+
+```text
+~/.codex/deepseek-reasoning-state.json
+```
 
 ## Local vLLM Or GPUStack Backends
 
@@ -171,7 +183,7 @@ Example manual run:
 export CODEX_DEEPSEEK_PROXY_PORT="8877"
 export DEEPSEEK_CHAT_URL="https://api.deepseek.com/chat/completions"
 export CODEX_DEEPSEEK_MODEL_ROUTES='{"qwen*":"http://YOUR_VLLM_HOST:8000/v1/chat/completions"}'
-export CODEX_DEEPSEEK_THINKING="omit"
+export CODEX_DEEPSEEK_THINKING="auto"
 python3 -m codex_deepseek_proxy.proxy
 ```
 
@@ -235,6 +247,15 @@ This is a Chat Completions history ordering rule. The proxy includes a normalize
 ```bash
 tail -n 80 ~/.codex/deepseek-responses-proxy.log
 ```
+
+### `reasoning_content ... must be passed back`
+
+DeepSeek thinking mode requires `reasoning_content` to be preserved for
+assistant messages that perform tool calls. This proxy captures that field from
+DeepSeek streaming responses and replays it on later tool-call turns. If this
+appears after upgrading from an older proxy version, start a new Codex session;
+older sessions may contain tool-call history from before the proxy captured the
+required reasoning state.
 
 ### Proxy Is Not Running
 

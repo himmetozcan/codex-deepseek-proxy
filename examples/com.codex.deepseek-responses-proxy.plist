@@ -14,6 +14,8 @@
   <dict>
     <key>CODEX_DEEPSEEK_PROXY_PORT</key>
     <string>8877</string>
+    <key>CODEX_DEEPSEEK_THINKING</key>
+    <string>auto</string>
   </dict>
   <key>RunAtLoad</key>
   <true/>

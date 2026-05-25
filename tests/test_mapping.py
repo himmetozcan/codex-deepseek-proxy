@@ -1,5 +1,6 @@
 import unittest
 
+from codex_deepseek_proxy import proxy
 from codex_deepseek_proxy.proxy import (
     apply_thinking_controls,
     chat_url_for_model,
@@ -122,17 +123,18 @@ class MappingTests(unittest.TestCase):
             "https://api.deepseek.com/chat/completions",
         )
 
-    def test_auto_thinking_disables_deepseek_and_omits_local_routes(self):
+    def test_auto_thinking_enables_deepseek_and_omits_local_routes(self):
         deepseek_request = {"reasoning": {"effort": "high"}}
-        deepseek_chat = {}
+        deepseek_chat = {"tool_choice": "auto"}
         apply_thinking_controls(
             deepseek_chat,
             deepseek_request,
             "https://api.deepseek.com/chat/completions",
         )
 
-        self.assertEqual(deepseek_chat["thinking"], {"type": "disabled"})
-        self.assertNotIn("reasoning_effort", deepseek_chat)
+        self.assertEqual(deepseek_chat["thinking"], {"type": "enabled"})
+        self.assertEqual(deepseek_chat["reasoning_effort"], "high")
+        self.assertNotIn("tool_choice", deepseek_chat)
 
         local_chat = {}
         apply_thinking_controls(
@@ -143,6 +145,33 @@ class MappingTests(unittest.TestCase):
 
         self.assertNotIn("thinking", local_chat)
         self.assertNotIn("reasoning_effort", local_chat)
+
+    def test_replays_reasoning_content_for_deepseek_tool_call_turns(self):
+        proxy.REASONING_BY_TOOL_CALL["call_a"] = "hidden reasoning"
+        try:
+            request = {
+                "input": [
+                    {
+                        "type": "function_call",
+                        "call_id": "call_a",
+                        "name": "exec_command",
+                        "arguments": '{"cmd":"pwd"}',
+                    },
+                    {
+                        "type": "function_call_output",
+                        "call_id": "call_a",
+                        "output": "/tmp",
+                    },
+                ],
+            }
+
+            messages = responses_input_to_chat_messages(request)
+        finally:
+            proxy.REASONING_BY_TOOL_CALL.pop("call_a", None)
+
+        self.assertEqual(messages[0]["role"], "assistant")
+        self.assertEqual(messages[0]["reasoning_content"], "hidden reasoning")
+        self.assertEqual(messages[1]["role"], "tool")
 
 
 if __name__ == "__main__":

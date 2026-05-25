@@ -6,7 +6,7 @@
 #   CODEX_DEEPSEEK_PROXY_PORT=8877 \
 #   DEEPSEEK_CHAT_URL="https://api.deepseek.com/chat/completions" \
 #   CODEX_DEEPSEEK_MODEL_ROUTES='{"qwen*":"http://YOUR_VLLM_HOST:8000/v1/chat/completions"}' \
-#   CODEX_DEEPSEEK_THINKING=omit \
+#   CODEX_DEEPSEEK_THINKING=auto \
 #   python3 -m codex_deepseek_proxy.proxy
 
 model_catalog_json = "/Users/YOU/.codex/local_vllm_model_catalog.json"
