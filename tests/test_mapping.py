@@ -1,6 +1,7 @@
 import unittest
 
 from codex_deepseek_proxy.proxy import (
+    apply_thinking_controls,
     chat_url_for_model,
     normalize_system_messages,
     normalize_tool_call_history,
@@ -120,6 +121,28 @@ class MappingTests(unittest.TestCase):
             ),
             "https://api.deepseek.com/chat/completions",
         )
+
+    def test_auto_thinking_disables_deepseek_and_omits_local_routes(self):
+        deepseek_request = {"reasoning": {"effort": "high"}}
+        deepseek_chat = {}
+        apply_thinking_controls(
+            deepseek_chat,
+            deepseek_request,
+            "https://api.deepseek.com/chat/completions",
+        )
+
+        self.assertEqual(deepseek_chat["thinking"], {"type": "disabled"})
+        self.assertNotIn("reasoning_effort", deepseek_chat)
+
+        local_chat = {}
+        apply_thinking_controls(
+            local_chat,
+            deepseek_request,
+            "http://example.local/v1/chat/completions",
+        )
+
+        self.assertNotIn("thinking", local_chat)
+        self.assertNotIn("reasoning_effort", local_chat)
 
 
 if __name__ == "__main__":

@@ -30,7 +30,8 @@ DEEPSEEK_CHAT_URL = os.environ.get(
 LOG_PATH = os.path.expanduser(
     os.environ.get("CODEX_DEEPSEEK_PROXY_LOG", "~/.codex/deepseek-responses-proxy.log")
 )
-THINKING = os.environ.get("CODEX_DEEPSEEK_THINKING", "disabled")
+# auto: disable DeepSeek thinking mode, omit the field for routed local backends.
+THINKING = os.environ.get("CODEX_DEEPSEEK_THINKING", "auto")
 DEBUG_EVENTS = os.environ.get("CODEX_DEEPSEEK_DEBUG_EVENTS") in ("1", "true", "yes")
 
 
@@ -79,6 +80,15 @@ def chat_url_for_model(
         if fnmatch.fnmatchcase(model, pattern):
             return url
     return default_url or DEEPSEEK_CHAT_URL
+
+
+def thinking_mode_for_upstream(upstream_url: str) -> str | None:
+    """Return the thinking mode to send, or None to omit the field."""
+    if THINKING == "omit":
+        return None
+    if THINKING == "auto":
+        return "disabled" if upstream_url == DEEPSEEK_CHAT_URL else None
+    return THINKING
 
 
 def log(message: str) -> None:
@@ -370,14 +380,25 @@ def build_chat_request(request_body: dict[str, Any]) -> dict[str, Any]:
     if max_output_tokens:
         chat_request["max_tokens"] = max_output_tokens
 
+    return chat_request
+
+
+def apply_thinking_controls(
+    chat_request: dict[str, Any],
+    request_body: dict[str, Any],
+    upstream_url: str,
+) -> None:
+    thinking_mode = thinking_mode_for_upstream(upstream_url)
+    if thinking_mode:
+        chat_request["thinking"] = {"type": thinking_mode}
+
+    if thinking_mode != "enabled":
+        return
+
     reasoning = request_body.get("reasoning")
     if isinstance(reasoning, dict) and reasoning.get("effort"):
         effort = reasoning["effort"]
         chat_request["reasoning_effort"] = "max" if effort == "xhigh" else effort
-
-    if THINKING != "omit":
-        chat_request["thinking"] = {"type": THINKING}
-    return chat_request
 
 
 def base_response(
@@ -479,10 +500,13 @@ class ProxyHandler(BaseHTTPRequestHandler):
 
         chat_request = build_chat_request(request_body)
         upstream_chat_url = chat_url_for_model(str(chat_request.get("model") or ""))
+        apply_thinking_controls(chat_request, request_body, upstream_chat_url)
         debug(
             "request "
             f"model={chat_request.get('model')} "
             f"upstream={upstream_chat_url} "
+            f"thinking={chat_request.get('thinking')} "
+            f"reasoning_effort={chat_request.get('reasoning_effort')} "
             f"messages={len(chat_request.get('messages') or [])} "
             f"tools={len(chat_request.get('tools') or [])} "
             f"max_tokens={chat_request.get('max_tokens')}"
