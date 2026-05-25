@@ -31,34 +31,27 @@ def deepseek_model_metadata(model: str) -> dict[str, Any]:
     return {
         "slug": model,
         "display_name": "DeepSeek V4 Pro",
-        "description": "DeepSeek V4 Pro via local Responses proxy.",
+        "description": "DeepSeek model accessed through a local Responses-to-Chat-Completions proxy.",
         "default_reasoning_level": "high",
         "supported_reasoning_levels": [
             {"effort": "low", "description": "Low reasoning"},
             {"effort": "medium", "description": "Medium reasoning"},
             {"effort": "high", "description": "High reasoning"},
+            {"effort": "xhigh", "description": "Extra high reasoning"},
         ],
         "shell_type": "shell_command",
         "visibility": "list",
         "supported_in_api": True,
         "priority": 1,
-        "additional_speed_tiers": [],
-        "service_tiers": [],
-        "availability_nux": None,
-        "upgrade": None,
         "base_instructions": (
-            "You are Codex, a coding agent running on DeepSeek V4 Pro through "
-            "a local Responses API compatibility proxy. If asked which model "
-            "you are, say you are DeepSeek V4 Pro configured in Codex."
+            "You are Codex, a coding agent. The configured backend model for "
+            f"this profile is {model} through a local compatibility proxy."
         ),
         "model_messages": {
             "instructions_template": (
-                "You are Codex, a coding agent running on DeepSeek V4 Pro through "
-                "a local Responses API compatibility proxy. If asked which model "
-                "you are, say: I am DeepSeek V4 Pro configured in Codex. Do not "
-                "claim to be GPT-5.\n\n{{ personality }}\n\n# General\n"
-                "Help with coding tasks through the Codex CLI. Use tools when "
-                "needed and keep answers concise."
+                "You are Codex, a coding agent. The configured backend model for "
+                f"this profile is {model} through a local compatibility proxy.\n\n"
+                "{{ personality }}"
             ),
             "instructions_variables": {},
         },
@@ -71,9 +64,6 @@ def deepseek_model_metadata(model: str) -> dict[str, Any]:
         "truncation_policy": {"mode": "tokens", "limit": 10000},
         "supports_parallel_tool_calls": False,
         "supports_image_detail_original": False,
-        "context_window": 64000,
-        "max_context_window": 64000,
-        "effective_context_window_percent": 90,
         "experimental_supported_tools": [],
         "input_modalities": ["text"],
         "supports_search_tool": False,
@@ -101,29 +91,13 @@ def install_proxy(codex_home: Path) -> Path:
 
 
 def write_model_catalog(codex_home: Path, model: str) -> Path:
-    models_cache = codex_home / "models_cache.json"
     catalog_path = codex_home / "deepseek_model_catalog.json"
-    models: list[dict[str, Any]] = []
     output: dict[str, Any] = {
         "fetched_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "etag": None,
         "client_version": None,
-        "models": models,
+        "models": [deepseek_model_metadata(model)],
     }
-
-    if models_cache.exists():
-        try:
-            cache = json.loads(models_cache.read_text(encoding="utf-8"))
-            output["fetched_at"] = cache.get("fetched_at") or output["fetched_at"]
-            output["etag"] = cache.get("etag")
-            output["client_version"] = cache.get("client_version")
-            models = list(cache.get("models") or [])
-        except Exception:
-            models = []
-
-    models = [entry for entry in models if entry.get("slug") != model]
-    models.append(deepseek_model_metadata(model))
-    output["models"] = models
     catalog_path.write_text(json.dumps(output, ensure_ascii=False, indent=2) + "\n")
     return catalog_path
 

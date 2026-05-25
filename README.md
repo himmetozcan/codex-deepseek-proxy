@@ -84,7 +84,7 @@ With this mode, Codex reads the key from `DEEPSEEK_API_KEY`.
 
 ## What Gets Added To Codex Config
 
-The installer adds a merged model catalog path and DeepSeek provider/profile blocks:
+The installer adds a custom model catalog path and DeepSeek provider/profile blocks:
 
 ```toml
 model_catalog_json = "/Users/YOU/.codex/deepseek_model_catalog.json"
@@ -101,6 +101,10 @@ model_reasoning_effort = "high"
 ```
 
 See [examples/config-snippet.toml](examples/config-snippet.toml).
+
+The generated catalog contains only the custom DeepSeek model metadata needed by
+Codex. It does not copy GPT model records from Codex's local cache, and it does
+not claim a DeepSeek context window.
 
 ## macOS Service
 
