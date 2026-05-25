@@ -1,0 +1,16 @@
+# This is the Codex config block added by the installer.
+# Do not commit a real API key.
+
+model_catalog_json = "/Users/YOU/.codex/deepseek_model_catalog.json"
+
+[model_providers.deepseek]
+name = "DeepSeek"
+base_url = "http://127.0.0.1:8877"
+experimental_bearer_token = "<your-deepseek-api-key>"
+# Safer alternative:
+# env_key = "DEEPSEEK_API_KEY"
+
+[profiles.deepseek-pro]
+model_provider = "deepseek"
+model = "deepseek-v4-pro"
+model_reasoning_effort = "high"

@@ -1,0 +1,22 @@
+# Example Codex config for a local OpenAI-compatible vLLM/GPUStack backend
+# routed through the same proxy service used for DeepSeek.
+# Do not commit a real API key.
+#
+# Start the proxy with:
+#   CODEX_DEEPSEEK_PROXY_PORT=8877 \
+#   DEEPSEEK_CHAT_URL="https://api.deepseek.com/chat/completions" \
+#   CODEX_DEEPSEEK_MODEL_ROUTES='{"qwen*":"http://YOUR_VLLM_HOST:8000/v1/chat/completions"}' \
+#   CODEX_DEEPSEEK_THINKING=omit \
+#   python3 -m codex_deepseek_proxy.proxy
+
+model_catalog_json = "/Users/YOU/.codex/local_vllm_model_catalog.json"
+
+[model_providers.local-vllm]
+name = "Local vLLM"
+base_url = "http://127.0.0.1:8877"
+env_key = "GPUSTACK_API_KEY"
+
+[profiles.local-vllm]
+model_provider = "local-vllm"
+model = "qwen3.6-35b-a3b-fp8"
+model_reasoning_effort = "medium"
