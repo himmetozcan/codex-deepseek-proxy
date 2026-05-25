@@ -14,6 +14,13 @@ class InstallTests(unittest.TestCase):
         self.assertNotIn("max_context_window", metadata)
         self.assertNotIn("effective_context_window_percent", metadata)
 
+    def test_metadata_does_not_force_backend_identity(self):
+        metadata = deepseek_model_metadata("deepseek-v4-pro")
+        instructions = metadata["model_messages"]["instructions_template"]
+
+        self.assertNotIn("DeepSeek V4 Pro configured", instructions)
+        self.assertNotIn("deepseek-v4-pro through", instructions)
+
     def test_catalog_contains_only_custom_model(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             codex_home = Path(temp_dir)

@@ -43,16 +43,9 @@ def deepseek_model_metadata(model: str) -> dict[str, Any]:
         "visibility": "list",
         "supported_in_api": True,
         "priority": 1,
-        "base_instructions": (
-            "You are Codex, a coding agent. The configured backend model for "
-            f"this profile is {model} through a local compatibility proxy."
-        ),
+        "base_instructions": "You are Codex, a coding agent.",
         "model_messages": {
-            "instructions_template": (
-                "You are Codex, a coding agent. The configured backend model for "
-                f"this profile is {model} through a local compatibility proxy.\n\n"
-                "{{ personality }}"
-            ),
+            "instructions_template": "You are Codex, a coding agent.\n\n{{ personality }}",
             "instructions_variables": {},
         },
         "supports_reasoning_summaries": False,
