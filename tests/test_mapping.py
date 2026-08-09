@@ -1,8 +1,11 @@
+import tempfile
 import unittest
+from pathlib import Path
 
 from codex_deepseek_proxy import proxy
 from codex_deepseek_proxy.proxy import (
     apply_thinking_controls,
+    authorization_for_model,
     chat_url_for_model,
     normalize_system_messages,
     normalize_tool_call_history,
@@ -122,6 +125,38 @@ class MappingTests(unittest.TestCase):
             ),
             "https://api.deepseek.com/chat/completions",
         )
+
+    def test_uses_model_specific_provider_auth_from_codex_config(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.toml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        "[model_providers.local-vllm]",
+                        'experimental_bearer_token = "local-test-key"',
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            auth = authorization_for_model(
+                "qwen3.6-35b-a3b-fp8",
+                "Bearer deepseek-test-key",
+                routes=[("qwen*", "local-vllm")],
+                config_path=str(config_path),
+            )
+
+        self.assertEqual(auth, "Bearer local-test-key")
+
+    def test_keeps_incoming_auth_without_model_specific_provider(self):
+        auth = authorization_for_model(
+            "deepseek-v4-pro",
+            "Bearer deepseek-test-key",
+            routes=[("qwen*", "local-vllm")],
+        )
+
+        self.assertEqual(auth, "Bearer deepseek-test-key")
 
     def test_auto_thinking_enables_deepseek_and_omits_local_routes(self):
         deepseek_request = {"reasoning": {"effort": "high"}}

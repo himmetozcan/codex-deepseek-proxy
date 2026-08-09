@@ -28,13 +28,15 @@ def remove_table_block(lines: list[str], header: str) -> list[str]:
 
 def remove_config(codex_home: Path, provider: str, profile: str) -> None:
     config_path = codex_home / "config.toml"
-    if not config_path.exists():
-        return
-    lines = config_path.read_text(encoding="utf-8").splitlines()
-    lines = [line for line in lines if not line.startswith("model_catalog_json =")]
-    lines = remove_table_block(lines, f"[model_providers.{provider}]")
-    lines = remove_table_block(lines, f"[profiles.{profile}]")
-    config_path.write_text("\n".join(lines).strip() + "\n", encoding="utf-8")
+    if config_path.exists():
+        lines = config_path.read_text(encoding="utf-8").splitlines()
+        catalog_path = codex_home / "deepseek_model_catalog.json"
+        legacy_catalog_line = f'model_catalog_json = "{catalog_path}"'
+        lines = [line for line in lines if line.strip() != legacy_catalog_line]
+        lines = remove_table_block(lines, f"[model_providers.{provider}]")
+        lines = remove_table_block(lines, f"[profiles.{profile}]")
+        config_path.write_text("\n".join(lines).strip() + "\n", encoding="utf-8")
+    (codex_home / f"{profile}.config.toml").unlink(missing_ok=True)
 
 
 def unload_launch_agent(plist_path: Path) -> None:

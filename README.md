@@ -46,7 +46,7 @@ For a safer setup, use `--auth-mode env` and export `DEEPSEEK_API_KEY` instead.
 ## Requirements
 
 - macOS for the LaunchAgent installer
-- Python 3.10+
+- Python 3.11+
 - Codex CLI installed and configured
 - A DeepSeek API key
 
@@ -62,7 +62,8 @@ The installer prompts for your DeepSeek API key and then:
 
 - copies the proxy to `~/.codex/codex-deepseek-proxy/proxy.py`
 - creates `~/.codex/deepseek_model_catalog.json`
-- patches `~/.codex/config.toml`
+- adds the DeepSeek provider to `~/.codex/config.toml`
+- creates `~/.codex/deepseek-pro.config.toml`
 - installs a macOS LaunchAgent
 - starts the local proxy on `127.0.0.1:8877`
 
@@ -86,23 +87,34 @@ With this mode, Codex reads the key from `DEEPSEEK_API_KEY`.
 
 ## What Gets Added To Codex Config
 
-The installer adds a custom model catalog path and DeepSeek provider/profile blocks:
+The installer adds the provider to the base config:
 
 ```toml
-model_catalog_json = "/Users/YOU/.codex/deepseek_model_catalog.json"
-
+# ~/.codex/config.toml
 [model_providers.deepseek]
 name = "DeepSeek"
 base_url = "http://127.0.0.1:8877"
 experimental_bearer_token = "<your-deepseek-api-key>"
+```
 
-[profiles.deepseek-pro]
+It writes the model selection to a separate profile file, which is the format
+required by Codex 0.134.0 and later:
+
+```toml
+# ~/.codex/deepseek-pro.config.toml
 model_provider = "deepseek"
 model = "deepseek-v4-pro"
 model_reasoning_effort = "high"
+service_tier = "default"
+model_catalog_json = "/Users/YOU/.codex/deepseek_model_catalog.json"
 ```
 
-See [examples/config-snippet.toml](examples/config-snippet.toml).
+See [examples/config-snippet.toml](examples/config-snippet.toml) and
+[examples/deepseek-pro.config.toml](examples/deepseek-pro.config.toml).
+
+Selecting only `deepseek-v4-pro` from a model picker does not switch the active
+provider. Start Codex with `codex --profile deepseek-pro` so the model and the
+`deepseek` provider are selected together.
 
 The generated catalog contains only the custom DeepSeek model metadata needed by
 Codex. It does not copy GPT model records from Codex's local cache, and it does
@@ -153,8 +165,10 @@ Useful environment variables:
 ```bash
 export CODEX_DEEPSEEK_PROXY_HOST="127.0.0.1"
 export CODEX_DEEPSEEK_PROXY_PORT="8877"
+export CODEX_DEEPSEEK_CODEX_CONFIG="$HOME/.codex/config.toml"
 export DEEPSEEK_CHAT_URL="https://api.deepseek.com/chat/completions"
 export CODEX_DEEPSEEK_MODEL_ROUTES='{"qwen*":"http://YOUR_VLLM_HOST:8000/v1/chat/completions"}'
+export CODEX_DEEPSEEK_MODEL_AUTH_PROVIDERS='{"qwen*":"local-vllm"}'
 export CODEX_DEEPSEEK_PROXY_LOG="$HOME/.codex/deepseek-responses-proxy.log"
 export CODEX_DEEPSEEK_THINKING="auto"
 ```
@@ -183,25 +197,52 @@ Example manual run:
 export CODEX_DEEPSEEK_PROXY_PORT="8877"
 export DEEPSEEK_CHAT_URL="https://api.deepseek.com/chat/completions"
 export CODEX_DEEPSEEK_MODEL_ROUTES='{"qwen*":"http://YOUR_VLLM_HOST:8000/v1/chat/completions"}'
+export CODEX_DEEPSEEK_MODEL_AUTH_PROVIDERS='{"qwen*":"local-vllm"}'
 export CODEX_DEEPSEEK_THINKING="auto"
 python3 -m codex_deepseek_proxy.proxy
 ```
 
-Then configure Codex with a provider that points at the local proxy:
+Then add a provider that points at the local proxy:
 
 ```toml
+# ~/.codex/config.toml
 [model_providers.local-vllm]
 name = "Local vLLM"
 base_url = "http://127.0.0.1:8877"
-env_key = "GPUSTACK_API_KEY"
+experimental_bearer_token = "<your-local-backend-api-key>"
+```
 
-[profiles.local-vllm]
+Create a separate profile file:
+
+```toml
+# ~/.codex/local-vllm.config.toml
 model_provider = "local-vllm"
 model = "qwen3.6-35b-a3b-fp8"
 model_reasoning_effort = "medium"
+service_tier = "default"
+model_catalog_json = "/Users/YOU/.codex/local_vllm_model_catalog.json"
 ```
 
 See [examples/vllm-config-snippet.toml](examples/vllm-config-snippet.toml).
+
+To expose DeepSeek and local models in one custom model picker, use one profile
+whose catalog contains both models. Route local models to their Chat Completions
+URL and tell the proxy which configured Codex provider owns their credentials:
+
+```bash
+export CODEX_DEEPSEEK_MODEL_ROUTES='{"qwen*":"http://YOUR_VLLM_HOST:8000/v1/chat/completions"}'
+export CODEX_DEEPSEEK_MODEL_AUTH_PROVIDERS='{"qwen*":"local-vllm"}'
+```
+
+The second setting contains only a provider name. The proxy reads that provider's
+`experimental_bearer_token` or `env_key` from the local Codex configuration and
+does not copy the secret into the LaunchAgent. Provider selection is session-wide
+in Codex, so GPT models authenticated through a ChatGPT account cannot be mixed
+with these third-party models in the same picker.
+
+When that provider uses `env_key`, the variable must also be available to the
+proxy process. A macOS LaunchAgent does not automatically inherit variables from
+your interactive shell; direct config auth avoids that launchd limitation.
 
 Some local backends reject multiple `system` messages. The proxy combines all
 system messages into one first message before forwarding the request.

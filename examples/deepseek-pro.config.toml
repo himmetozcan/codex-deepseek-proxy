@@ -1,0 +1,7 @@
+# Save as ~/.codex/deepseek-pro.config.toml.
+
+model_provider = "deepseek"
+model = "deepseek-v4-pro"
+model_reasoning_effort = "high"
+service_tier = "default"
+model_catalog_json = "/Users/YOU/.codex/deepseek_model_catalog.json"

@@ -15,6 +15,7 @@ import json
 import os
 import threading
 import time
+import tomllib
 import traceback
 import urllib.error
 import urllib.request
@@ -42,6 +43,9 @@ REASONING_STATE_PATH = os.path.expanduser(
     )
 )
 MAX_REASONING_STATE = int(os.environ.get("CODEX_DEEPSEEK_MAX_REASONING_STATE", "1000"))
+CODEX_CONFIG_PATH = os.path.expanduser(
+    os.environ.get("CODEX_DEEPSEEK_CODEX_CONFIG", "~/.codex/config.toml")
+)
 
 
 def parse_model_routes(value: str | None) -> list[tuple[str, str]]:
@@ -78,6 +82,9 @@ MODEL_ROUTES = parse_model_routes(
     os.environ.get("CODEX_DEEPSEEK_MODEL_ROUTES")
     or os.environ.get("CODEX_CHAT_COMPLETIONS_MODEL_ROUTES")
 )
+MODEL_AUTH_PROVIDERS = parse_model_routes(
+    os.environ.get("CODEX_DEEPSEEK_MODEL_AUTH_PROVIDERS")
+)
 
 
 def chat_url_for_model(
@@ -89,6 +96,58 @@ def chat_url_for_model(
         if fnmatch.fnmatchcase(model, pattern):
             return url
     return default_url or DEEPSEEK_CHAT_URL
+
+
+def auth_provider_for_model(
+    model: str,
+    routes: list[tuple[str, str]] | None = None,
+) -> str | None:
+    for pattern, provider in routes if routes is not None else MODEL_AUTH_PROVIDERS:
+        if fnmatch.fnmatchcase(model, pattern):
+            return provider
+    return None
+
+
+def authorization_for_model(
+    model: str,
+    incoming_header: str,
+    routes: list[tuple[str, str]] | None = None,
+    config_path: str | None = None,
+    environ: dict[str, str] | None = None,
+) -> str:
+    """Resolve model-specific upstream auth without storing secrets in launchd."""
+    provider_id = auth_provider_for_model(model, routes)
+    if not provider_id:
+        return incoming_header
+
+    path = os.path.expanduser(config_path or CODEX_CONFIG_PATH)
+    try:
+        with open(path, "rb") as handle:
+            config = tomllib.load(handle)
+    except (OSError, tomllib.TOMLDecodeError) as exc:
+        raise RuntimeError(
+            f"Cannot read Codex provider configuration from {path}"
+        ) from exc
+
+    providers = config.get("model_providers")
+    provider = providers.get(provider_id) if isinstance(providers, dict) else None
+    if not isinstance(provider, dict):
+        raise RuntimeError(
+            f"Model auth provider '{provider_id}' is not configured in {path}"
+        )
+
+    token = provider.get("experimental_bearer_token")
+    if not token:
+        env_key = provider.get("env_key")
+        environment = environ if environ is not None else os.environ
+        token = environment.get(env_key) if isinstance(env_key, str) else None
+    if not isinstance(token, str) or not token.strip():
+        raise RuntimeError(
+            f"Model auth provider '{provider_id}' has no available bearer token"
+        )
+
+    token = token.strip()
+    return token if token.lower().startswith("bearer ") else f"Bearer {token}"
 
 
 def thinking_mode_for_upstream(upstream_url: str) -> str | None:
@@ -595,7 +654,9 @@ class ProxyHandler(BaseHTTPRequestHandler):
             return
 
         chat_request = build_chat_request(request_body)
-        upstream_chat_url = chat_url_for_model(str(chat_request.get("model") or ""))
+        model = str(chat_request.get("model") or "")
+        upstream_chat_url = chat_url_for_model(model)
+        upstream_auth_header = authorization_for_model(model, auth_header)
         apply_thinking_controls(chat_request, request_body, upstream_chat_url)
         debug(
             "request "
@@ -611,7 +672,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
             upstream_chat_url,
             data=json.dumps(chat_request, ensure_ascii=False).encode("utf-8"),
             headers={
-                "authorization": auth_header,
+                "authorization": upstream_auth_header,
                 "content-type": "application/json",
                 "accept": "text/event-stream",
             },
@@ -870,7 +931,8 @@ def main() -> None:
     server = ThreadingHTTPServer((HOST, PORT), ProxyHandler)
     log(
         f"listening on http://{HOST}:{PORT}, upstream={DEEPSEEK_CHAT_URL}, "
-        f"routes={len(MODEL_ROUTES)}, thinking={THINKING}"
+        f"routes={len(MODEL_ROUTES)}, auth_routes={len(MODEL_AUTH_PROVIDERS)}, "
+        f"thinking={THINKING}"
     )
     server.serve_forever()
 

@@ -9,14 +9,8 @@
 #   CODEX_DEEPSEEK_THINKING=auto \
 #   python3 -m codex_deepseek_proxy.proxy
 
-model_catalog_json = "/Users/YOU/.codex/local_vllm_model_catalog.json"
-
 [model_providers.local-vllm]
 name = "Local vLLM"
 base_url = "http://127.0.0.1:8877"
-env_key = "GPUSTACK_API_KEY"
-
-[profiles.local-vllm]
-model_provider = "local-vllm"
-model = "qwen3.6-35b-a3b-fp8"
-model_reasoning_effort = "medium"
+experimental_bearer_token = "<your-local-backend-api-key>"
+# Use env_key only when the proxy process also receives that environment variable.

@@ -7,7 +7,7 @@ name = "codex-deepseek-proxy"
 version = "0.1.0"
 description = "Local Responses API compatibility proxy for using DeepSeek models with Codex."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [
   { name = "Codex DeepSeek Proxy Contributors" }

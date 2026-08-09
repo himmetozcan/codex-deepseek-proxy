@@ -109,14 +109,28 @@ def remove_table_block(lines: list[str], header: str) -> list[str]:
     return output
 
 
-def set_top_level_key(lines: list[str], key: str, value: str) -> list[str]:
-    lines = [line for line in lines if not line.startswith(f"{key} =")]
-    insert_at = 0
-    while insert_at < len(lines) and not lines[insert_at].startswith("["):
-        insert_at += 1
-    while insert_at > 0 and lines[insert_at - 1] == "":
-        insert_at -= 1
-    return lines[:insert_at] + [f'{key} = "{value}"', ""] + lines[insert_at:]
+def write_profile_config(
+    codex_home: Path,
+    profile: str,
+    provider: str,
+    model: str,
+    catalog_path: Path,
+) -> Path:
+    profile_path = codex_home / f"{profile}.config.toml"
+    profile_path.write_text(
+        "\n".join(
+            [
+                f'model_provider = "{provider}"',
+                f'model = "{model}"',
+                'model_reasoning_effort = "high"',
+                'service_tier = "default"',
+                f'model_catalog_json = "{catalog_path}"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    return profile_path
 
 
 def patch_codex_config(
@@ -128,7 +142,7 @@ def patch_codex_config(
     port: int,
     catalog_path: Path,
     auth_mode: str,
-) -> Path:
+) -> tuple[Path, Path]:
     config_path = codex_home / "config.toml"
     config_path.parent.mkdir(parents=True, exist_ok=True)
     if config_path.exists():
@@ -142,8 +156,10 @@ def patch_codex_config(
 
     lines = original.splitlines()
     lines = remove_table_block(lines, f"[model_providers.{provider}]")
+    # Migrate the profile format used by Codex versions older than 0.134.0.
     lines = remove_table_block(lines, f"[profiles.{profile}]")
-    lines = set_top_level_key(lines, "model_catalog_json", str(catalog_path))
+    legacy_catalog_line = f'model_catalog_json = "{catalog_path}"'
+    lines = [line for line in lines if line.strip() != legacy_catalog_line]
 
     auth_line = (
         f'env_key = "DEEPSEEK_API_KEY"'
@@ -159,15 +175,17 @@ def patch_codex_config(
             auth_line,
             "# Local proxy converts Codex Responses API calls to DeepSeek chat/completions.",
             "",
-            f"[profiles.{profile}]",
-            f'model_provider = "{provider}"',
-            f'model = "{model}"',
-            'model_reasoning_effort = "high"',
-            "",
         ]
     )
     config_path.write_text("\n".join(lines).strip() + "\n", encoding="utf-8")
-    return backup_path
+    profile_path = write_profile_config(
+        codex_home=codex_home,
+        profile=profile,
+        provider=provider,
+        model=model,
+        catalog_path=catalog_path,
+    )
+    return backup_path, profile_path
 
 
 def write_launch_agent(
@@ -176,6 +194,7 @@ def write_launch_agent(
     python_path: str,
     thinking: str,
     model_routes: list[str],
+    model_auth_providers: list[str],
 ) -> Path:
     launch_agents = Path.home() / "Library" / "LaunchAgents"
     launch_agents.mkdir(parents=True, exist_ok=True)
@@ -186,6 +205,12 @@ def write_launch_agent(
         routes_value = html.escape(";".join(model_routes), quote=False)
         route_env = f"""    <key>CODEX_DEEPSEEK_MODEL_ROUTES</key>
     <string>{routes_value}</string>
+"""
+    auth_provider_env = ""
+    if model_auth_providers:
+        auth_providers_value = html.escape(";".join(model_auth_providers), quote=False)
+        auth_provider_env = f"""    <key>CODEX_DEEPSEEK_MODEL_AUTH_PROVIDERS</key>
+    <string>{auth_providers_value}</string>
 """
     plist = f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
@@ -203,9 +228,12 @@ def write_launch_agent(
   <dict>
     <key>CODEX_DEEPSEEK_PROXY_PORT</key>
     <string>{port}</string>
+    <key>CODEX_DEEPSEEK_CODEX_CONFIG</key>
+    <string>{codex_home}/config.toml</string>
     <key>CODEX_DEEPSEEK_THINKING</key>
     <string>{thinking}</string>
 {route_env.rstrip()}
+{auth_provider_env.rstrip()}
   </dict>
   <key>RunAtLoad</key>
   <true/>
@@ -265,6 +293,16 @@ def main() -> int:
         metavar="PATTERN=URL",
         help="Route matching model names to a Chat Completions URL. Can be repeated.",
     )
+    parser.add_argument(
+        "--model-auth-provider",
+        action="append",
+        default=[],
+        metavar="PATTERN=PROVIDER",
+        help=(
+            "Use a Codex model provider's configured bearer token for matching "
+            "models. Can be repeated."
+        ),
+    )
     parser.add_argument("--no-launch-agent", action="store_true")
     args = parser.parse_args()
 
@@ -276,7 +314,7 @@ def main() -> int:
     codex_home.mkdir(parents=True, exist_ok=True)
     proxy_path = install_proxy(codex_home)
     catalog_path = write_model_catalog(codex_home, args.model)
-    backup_path = patch_codex_config(
+    backup_path, profile_path = patch_codex_config(
         codex_home=codex_home,
         api_key=api_key,
         model=args.model,
@@ -295,12 +333,14 @@ def main() -> int:
             args.python,
             args.thinking,
             args.model_route,
+            args.model_auth_provider,
         )
         launch_service(plist_path)
 
     print(f"Installed proxy: {proxy_path}")
     print(f"Wrote model catalog: {catalog_path}")
     print(f"Patched Codex config: {codex_home / 'config.toml'}")
+    print(f"Wrote Codex profile: {profile_path}")
     if backup_path.exists():
         print(f"Config backup: {backup_path}")
     if plist_path:
