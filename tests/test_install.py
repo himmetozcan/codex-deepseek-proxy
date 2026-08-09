@@ -10,7 +10,6 @@ from scripts.install import (
     write_launch_agent,
     write_model_catalog,
 )
-from scripts.uninstall import remove_config
 
 
 class InstallTests(unittest.TestCase):
@@ -86,35 +85,6 @@ class InstallTests(unittest.TestCase):
         self.assertIn('service_tier = "default"', profile_config)
         self.assertIn(f'model_catalog_json = "{catalog_path}"', profile_config)
 
-    def test_desktop_default_writes_global_provider_and_catalog(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            codex_home = Path(temp_dir)
-            catalog_path = codex_home / "deepseek_model_catalog.json"
-            (codex_home / "config.toml").write_text(
-                'service_tier = "priority"\n\n[history]\npersistence = "save-all"\n',
-                encoding="utf-8",
-            )
-
-            patch_codex_config(
-                codex_home=codex_home,
-                api_key="test-key",
-                model="deepseek-v4-pro",
-                provider="deepseek",
-                profile="deepseek-pro",
-                port=8877,
-                catalog_path=catalog_path,
-                auth_mode="direct",
-                desktop_default=True,
-            )
-
-            config = (codex_home / "config.toml").read_text(encoding="utf-8")
-
-        self.assertIn('model_provider = "deepseek"', config)
-        self.assertIn('model = "deepseek-v4-pro"', config)
-        self.assertIn(f'model_catalog_json = "{catalog_path}"', config)
-        self.assertIn('service_tier = "default"', config)
-        self.assertNotIn('service_tier = "priority"', config)
-
     def test_launch_agent_writes_route_and_auth_provider_maps(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             home = Path(temp_dir)
@@ -138,40 +108,6 @@ class InstallTests(unittest.TestCase):
         self.assertIn("CODEX_DEEPSEEK_MODEL_AUTH_PROVIDERS", plist)
         self.assertIn("qwen*=local-vllm", plist)
         self.assertIn("CODEX_DEEPSEEK_CODEX_CONFIG", plist)
-
-    def test_uninstaller_removes_desktop_default_assignments(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            codex_home = Path(temp_dir)
-            catalog_path = codex_home / "deepseek_model_catalog.json"
-            (codex_home / "config.toml").write_text(
-                "\n".join(
-                    [
-                        'model_provider = "deepseek"',
-                        'model = "deepseek-v4-pro"',
-                        f'model_catalog_json = "{catalog_path}"',
-                        'service_tier = "default"',
-                        "",
-                        "[model_providers.deepseek]",
-                        'base_url = "http://127.0.0.1:8877"',
-                        "",
-                    ]
-                ),
-                encoding="utf-8",
-            )
-
-            remove_config(
-                codex_home,
-                provider="deepseek",
-                profile="deepseek-pro",
-                model="deepseek-v4-pro",
-            )
-
-            config = (codex_home / "config.toml").read_text(encoding="utf-8")
-
-        self.assertNotIn('model_provider = "deepseek"', config)
-        self.assertNotIn('model = "deepseek-v4-pro"', config)
-        self.assertNotIn("model_catalog_json", config)
-        self.assertNotIn("[model_providers.deepseek]", config)
 
 
 if __name__ == "__main__":

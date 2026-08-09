@@ -109,23 +109,6 @@ def remove_table_block(lines: list[str], header: str) -> list[str]:
     return output
 
 
-def set_top_level_string(lines: list[str], key: str, value: str) -> list[str]:
-    table_index = next(
-        (index for index, line in enumerate(lines) if line.startswith("[")),
-        len(lines),
-    )
-    prefix = [
-        line
-        for line in lines[:table_index]
-        if not line.strip().startswith(f"{key} =")
-    ]
-    while prefix and not prefix[-1].strip():
-        prefix.pop()
-    prefix.append(f'{key} = "{value}"')
-    prefix.append("")
-    return prefix + lines[table_index:]
-
-
 def write_profile_config(
     codex_home: Path,
     profile: str,
@@ -159,7 +142,6 @@ def patch_codex_config(
     port: int,
     catalog_path: Path,
     auth_mode: str,
-    desktop_default: bool = False,
 ) -> tuple[Path, Path]:
     config_path = codex_home / "config.toml"
     config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -176,14 +158,8 @@ def patch_codex_config(
     lines = remove_table_block(lines, f"[model_providers.{provider}]")
     # Migrate the profile format used by Codex versions older than 0.134.0.
     lines = remove_table_block(lines, f"[profiles.{profile}]")
-    if desktop_default:
-        lines = set_top_level_string(lines, "model_provider", provider)
-        lines = set_top_level_string(lines, "model", model)
-        lines = set_top_level_string(lines, "model_catalog_json", str(catalog_path))
-        lines = set_top_level_string(lines, "service_tier", "default")
-    else:
-        legacy_catalog_line = f'model_catalog_json = "{catalog_path}"'
-        lines = [line for line in lines if line.strip() != legacy_catalog_line]
+    legacy_catalog_line = f'model_catalog_json = "{catalog_path}"'
+    lines = [line for line in lines if line.strip() != legacy_catalog_line]
 
     auth_line = (
         f'env_key = "DEEPSEEK_API_KEY"'
@@ -327,14 +303,6 @@ def main() -> int:
             "models. Can be repeated."
         ),
     )
-    parser.add_argument(
-        "--desktop-default",
-        action="store_true",
-        help=(
-            "Make this provider and its catalog the global default used by the "
-            "Codex desktop app."
-        ),
-    )
     parser.add_argument("--no-launch-agent", action="store_true")
     args = parser.parse_args()
 
@@ -355,7 +323,6 @@ def main() -> int:
         port=args.port,
         catalog_path=catalog_path,
         auth_mode=args.auth_mode,
-        desktop_default=args.desktop_default,
     )
 
     plist_path = None
@@ -374,9 +341,6 @@ def main() -> int:
     print(f"Wrote model catalog: {catalog_path}")
     print(f"Patched Codex config: {codex_home / 'config.toml'}")
     print(f"Wrote Codex profile: {profile_path}")
-    if args.desktop_default:
-        print("Enabled the custom catalog as the Codex desktop default.")
-        print("Restart the Codex desktop app to reload the model catalog.")
     if backup_path.exists():
         print(f"Config backup: {backup_path}")
     if plist_path:

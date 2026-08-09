@@ -73,25 +73,6 @@ Then start Codex with:
 codex --profile deepseek-pro
 ```
 
-## Codex Desktop App
-
-Profile files are selected with the CLI `--profile` flag; the desktop app does
-not start its app server with that flag. To make the custom catalog the desktop
-default, install with:
-
-```bash
-./scripts/install-macos.sh --desktop-default
-```
-
-This writes `model`, `model_provider`, and `model_catalog_json` at the top level
-of `~/.codex/config.toml`. Fully restart the Codex desktop app after installation.
-The installer creates a timestamped config backup before changing these values.
-
-Codex selects one provider for a session. Consequently, a desktop picker backed
-by the DeepSeek provider should contain only models served by this proxy, such as
-DeepSeek and routed local models. It cannot safely mix those entries with GPT
-models authenticated through a ChatGPT account.
-
 ## Install With Environment Variable Auth
 
 If you do not want the API key written into `config.toml`:
